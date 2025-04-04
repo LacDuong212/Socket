@@ -1,11 +1,14 @@
 package com.example.socket;
 
+import android.Manifest;
 import android.app.ProgressDialog;
 import android.bluetooth.BluetoothAdapter;
 import android.bluetooth.BluetoothDevice;
 import android.bluetooth.BluetoothSocket;
 import android.content.Intent;
+import android.content.pm.PackageManager;
 import android.os.AsyncTask;
+import android.os.Build;
 import android.os.Bundle;
 import android.widget.ImageButton;
 import android.widget.TextView;
@@ -13,149 +16,202 @@ import android.widget.Toast;
 
 import androidx.annotation.Nullable;
 import androidx.appcompat.app.AppCompatActivity;
+import androidx.core.app.ActivityCompat;
+import androidx.core.content.ContextCompat;
 
 import java.io.IOException;
+import java.util.Set;
 import java.util.UUID;
 
 public class ControlActivity extends AppCompatActivity {
 
     // SPP UUID
-    private static final UUID SPP_UUID = UUID.fromString("00001101-0000-1000-8000-00805F9B34FB");
-    // Bluetooth UI Components
-    ImageButton btnDevice1, btnDevice2, btnDisconnect;
-    TextView txtStatus, txtMacAddress;
-    // Bluetooth Core Components
-    private BluetoothAdapter bluetoothAdapter = null;
-    private BluetoothSocket bluetoothSocket = null;
-    private boolean isBluetoothConnected = false;
-    // Device Management
-    private String deviceAddress = null;
-    // UI Feedback
-    private ProgressDialog connectionProgressDialog;
-    // Device Control Flags
-    private int lamp1StatusFlag = 0;
-    private int lamp2StatusFlag = 0;
+    private static final UUID MY_UUID = UUID.fromString("00001101-0000-1000-8000-00805F9B34FB");
+    private static final int REQUEST_BLUETOOTH_PERMISSION = 1;
+
+    // UI Components
+    private ImageButton btnDevice1, btnDevice2, btnDisconnect;
+    private TextView txtStatus, txtMacAddress;
+
+    // Bluetooth Components
+    private BluetoothAdapter bluetoothAdapter;
+    private BluetoothSocket bluetoothSocket;
+    private boolean isBtConnected = false;
+    private String deviceAddress;
+
+    // Device State
+    private int device1State = 0;
+    private int device2State = 0;
+    private ProgressDialog progressDialog;
 
     @Override
     protected void onCreate(@Nullable Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        setContentView(R.layout.activity_control);
 
         // Get device address from intent
         Intent intent = getIntent();
         deviceAddress = intent.getStringExtra(MainActivity.EXTRA_ADDRESS);
 
-        setContentView(R.layout.activity_control);
-
         // Initialize views
+        initViews();
+
+        // Check and request Bluetooth permissions
+        if (checkBluetoothPermissions()) {
+            new ConnectBluetoothTask().execute();
+        }
+    }
+
+    private void initViews() {
         btnDevice1 = findViewById(R.id.btnTb1);
         btnDevice2 = findViewById(R.id.btnTb2);
         txtStatus = findViewById(R.id.textV1);
         txtMacAddress = findViewById(R.id.textViewMAC);
         btnDisconnect = findViewById(R.id.btnDisc);
 
-        // Show MAC address
-        txtMacAddress.setText(deviceAddress);
-
-        // Connect to Bluetooth device
-        new ConnectBT().execute();
-
-        btnDevice1.setOnClickListener(v -> thietTbi1());
-        btnDevice2.setOnClickListener(v -> thietTbi7());
-        btnDisconnect.setOnClickListener(v -> Disconnect());
+        btnDevice1.setOnClickListener(v -> toggleDevice1());
+        btnDevice2.setOnClickListener(v -> toggleDevice2());
+        btnDisconnect.setOnClickListener(v -> disconnect());
     }
 
-    private void Disconnect() {
-        if (bluetoothSocket != null) {
-            try {
-                bluetoothSocket.close();
-            } catch (IOException e) {
-                msg("Lỗi khi ngắt kết nối.");
+    private boolean checkBluetoothPermissions() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_CONNECT)
+                    != PackageManager.PERMISSION_GRANTED) {
+                ActivityCompat.requestPermissions(this,
+                        new String[]{Manifest.permission.BLUETOOTH_CONNECT},
+                        REQUEST_BLUETOOTH_PERMISSION);
+                return false;
             }
+        }
+        return true;
+    }
+
+    @Override
+    public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        if (requestCode == REQUEST_BLUETOOTH_PERMISSION) {
+            if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+                new ConnectBluetoothTask().execute();
+            } else {
+                showToast("Bluetooth permission required");
+                finish();
+            }
+        }
+    }
+
+    private void toggleDevice1() {
+        if (bluetoothSocket != null && isBtConnected) {
+            try {
+                if (device1State == 0) {
+                    // Turn device 1 ON
+                    device1State = 1;
+                    btnDevice1.setBackgroundResource(R.drawable.tbon);
+                    bluetoothSocket.getOutputStream().write("1".getBytes());
+                    txtStatus.setText("Thiết bị số 1 đang bật");
+                } else {
+                    // Turn device 1 OFF
+                    device1State = 0;
+                    btnDevice1.setBackgroundResource(R.drawable.tboff);
+                    bluetoothSocket.getOutputStream().write("A".getBytes());
+                    txtStatus.setText("Thiết bị số 1 đang tắt");
+                }
+            } catch (IOException e) {
+                showToast("Lỗi gửi lệnh");
+            }
+        }
+    }
+
+    private void toggleDevice2() {
+        if (bluetoothSocket != null && isBtConnected) {
+            try {
+                if (device2State == 0) {
+                    // Turn device 2 ON
+                    device2State = 1;
+                    btnDevice2.setBackgroundResource(R.drawable.tbon);
+                    bluetoothSocket.getOutputStream().write("7".getBytes());
+                    txtStatus.setText("Thiết bị số 2 đang bật");
+                } else {
+                    // Turn device 2 OFF
+                    device2State = 0;
+                    btnDevice2.setBackgroundResource(R.drawable.tboff);
+                    bluetoothSocket.getOutputStream().write("G".getBytes());
+                    txtStatus.setText("Thiết bị số 2 đang tắt");
+                }
+            } catch (IOException e) {
+                showToast("Lỗi gửi lệnh");
+            }
+        }
+    }
+
+    private void disconnect() {
+        try {
+            if (bluetoothSocket != null) {
+                bluetoothSocket.close();
+            }
+        } catch (IOException e) {
+            showToast("Lỗi khi ngắt kết nối");
         }
         finish();
     }
 
-    private void thietTbi1() {
-        if (bluetoothSocket != null) {
-            try {
-                if (lamp1StatusFlag == 0) {
-                    lamp1StatusFlag = 1;
-                    btnDevice1.setBackgroundResource(R.drawable.tblon);
-                    bluetoothSocket.getOutputStream().write("1".getBytes());
-                    txtStatus.setText("Thiết bị số 1 đang bật");
-                } else {
-                    lamp1StatusFlag = 0;
-                    btnDevice1.setBackgroundResource(R.drawable.btnotconnect);
-                    bluetoothSocket.getOutputStream().write("0".getBytes());
-                    txtStatus.setText("Thiết bị số 1 đang tắt");
-                }
-            } catch (IOException e) {
-                msg("Lỗi điều khiển thiết bị 1.");
-            }
-        }
+    private void showToast(String message) {
+        Toast.makeText(this, message, Toast.LENGTH_SHORT).show();
     }
 
-    private void thietTbi7() {
-        if (bluetoothSocket != null) {
-            try {
-                if (lamp2StatusFlag == 0) {
-                    lamp2StatusFlag = 1;
-                    btnDevice2.setBackgroundResource(R.drawable.tblon);
-                    bluetoothSocket.getOutputStream().write("7".getBytes());
-                    txtStatus.setText("Thiết bị số 7 đang bật");
-                } else {
-                    lamp2StatusFlag = 0;
-                    btnDevice2.setBackgroundResource(R.drawable.btnotconnect);
-                    bluetoothSocket.getOutputStream().write("G".getBytes());
-                    txtStatus.setText("Thiết bị số 7 đang tắt");
-                }
-            } catch (IOException e) {
-                msg("Lỗi điều khiển thiết bị 7.");
-            }
-        }
-    }
-
-    private void msg(String s) {
-        Toast.makeText(getApplicationContext(), s, Toast.LENGTH_SHORT).show();
-    }
-
-    private class ConnectBT extends AsyncTask<Void, Void, Void> {
-        private boolean ConnectSuccess = true;
-
+    private class ConnectBluetoothTask extends AsyncTask<Void, Void, Boolean> {
         @Override
         protected void onPreExecute() {
-            connectionProgressDialog = ProgressDialog.show(ControlActivity.this, "Đang kết nối...", "Xin vui lòng đợi!!!");
+            progressDialog = ProgressDialog.show(ControlActivity.this,
+                    "Đang kết nối...", "Vui lòng đợi...", true);
         }
 
         @Override
-        protected Void doInBackground(Void... devices) {
+        protected Boolean doInBackground(Void... voids) {
             try {
-                if (bluetoothSocket == null || !isBluetoothConnected) {
+                if (bluetoothSocket == null || !isBtConnected) {
                     bluetoothAdapter = BluetoothAdapter.getDefaultAdapter();
                     BluetoothDevice device = bluetoothAdapter.getRemoteDevice(deviceAddress);
-                    bluetoothSocket = device.createRfcommSocketToServiceRecord(SPP_UUID);
-                    bluetoothAdapter.cancelDiscovery();
-                    bluetoothSocket.connect();
+
+                    if (ActivityCompat.checkSelfPermission(ControlActivity.this,
+                            Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED) {
+                        bluetoothSocket = device.createRfcommSocketToServiceRecord(MY_UUID);
+                        bluetoothAdapter.cancelDiscovery();
+                        bluetoothSocket.connect();
+                        return true;
+                    }
                 }
             } catch (IOException e) {
-                ConnectSuccess = false;
+                return false;
             }
-            return null;
+            return false;
         }
 
         @Override
-        protected void onPostExecute(Void result) {
-            super.onPostExecute(result);
-            if (connectionProgressDialog != null && connectionProgressDialog.isShowing()) {
-                connectionProgressDialog.dismiss();
-            }
+        protected void onPostExecute(Boolean success) {
+            progressDialog.dismiss();
 
-            if (!ConnectSuccess) {
-                msg("Kết nối thất bại! Kiểm tra thiết bị.");
-                finish();
+            if (success) {
+                isBtConnected = true;
+                showToast("Kết nối thành công");
+                showPairedDevices();
             } else {
-                msg("Kết nối thành công.");
-                isBluetoothConnected = true;
+                showToast("Kết nối thất bại");
+                finish();
+            }
+        }
+
+        private void showPairedDevices() {
+            if (ActivityCompat.checkSelfPermission(ControlActivity.this,
+                    Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED) {
+                Set<BluetoothDevice> pairedDevices = bluetoothAdapter.getBondedDevices();
+                if (pairedDevices != null && !pairedDevices.isEmpty()) {
+                    for (BluetoothDevice device : pairedDevices) {
+                        txtMacAddress.setText(device.getName() + " - " + device.getAddress());
+                    }
+                } else {
+                    showToast("Không tìm thấy thiết bị đã kết nối");
+                }
             }
         }
     }
